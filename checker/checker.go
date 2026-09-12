@@ -15,8 +15,8 @@
 //     stripped, and base64-decoded readings of the same text, so a secret
 //     split with spaces or hidden in an encoded blob doesn't slip through.
 //
-// Deliberately NOT covered yet: SRV-15 (checking the answer coming back).
-// That's tracked separately; don't assume this package sees model output.
+// Output-side handling (SRV-15, checking an answer already generated) is
+// in sanitize.go — SanitizeForDelivery, not this file.
 package checker
 
 import (
@@ -104,8 +104,11 @@ type Result struct {
 	// Findings is deduplicated (by kind+label+span) for readability in API
 	// responses and logs. The decision itself is computed from the full,
 	// non-deduplicated set across every view — see Check.
-	Findings   []Finding
-	MaskedText string // populated only when Decision == Mask
+	Findings []Finding
+	// MaskedText is populated whenever there are ANY raw findings, not only
+	// when Decision is Mask — SanitizeForDelivery (sanitize.go) needs a
+	// masked version available for KeepOnPC results too.
+	MaskedText string
 }
 
 var (
@@ -151,7 +154,11 @@ func Check(text string, policy Policy) Result {
 	}
 
 	result := Result{Decision: decision, Findings: dedupeFindings(all)}
-	if decision == Mask {
+	if len(rawFindings) > 0 {
+		// Populated whenever raw findings exist, not only when Decision
+		// is Mask — SanitizeForDelivery needs a masked version available
+		// for KeepOnPC results too (redact-on-output beats withhold-the-
+		// whole-answer for things like example credentials in code).
 		result.MaskedText = maskText(text, rawFindings)
 	}
 	return result
@@ -221,10 +228,19 @@ func scanPII(text string, view View) []Finding {
 	for _, m := range emailRe.FindAllString(text, -1) {
 		findings = append(findings, Finding{Kind: KindPII, Label: "email", View: view, Span: m})
 	}
-	for _, m := range phoneRe.FindAllString(text, -1) {
-		digits := onlyDigits(m)
+	for _, m := range phoneRe.FindAllStringIndex(text, -1) {
+		start, end := m[0], m[1]
+		if touchesLetter(text, start, end) {
+			// A digit run glued to letters on either side (e.g. the
+			// "1234567890" inside "AKIAEXAMPLE1234567890") isn't a phone
+			// number — real ones appear as their own token, not embedded
+			// inside a longer alphanumeric identifier.
+			continue
+		}
+		span := text[start:end]
+		digits := onlyDigits(span)
 		if len(digits) >= 10 && len(digits) <= 15 && !allSameDigit(digits) {
-			findings = append(findings, Finding{Kind: KindPII, Label: "phone_number", View: view, Span: m})
+			findings = append(findings, Finding{Kind: KindPII, Label: "phone_number", View: view, Span: span})
 		}
 	}
 	// SRV-11: confirm before acting — a long number is only a card number if
@@ -285,6 +301,24 @@ func looksLikeText(b []byte) bool {
 		}
 	}
 	return printable*100/len(b) > 85
+}
+
+// touchesLetter reports whether the byte immediately before start, or
+// immediately at end, is an ASCII letter. Used to reject a phone-shaped
+// digit run that's actually embedded inside a longer identifier (e.g. the
+// "1234567890" inside "AKIAEXAMPLE1234567890") — a real phone number
+// appears as its own token, not glued to letters on either side.
+func touchesLetter(text string, start, end int) bool {
+	isLetter := func(b byte) bool {
+		return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+	}
+	if start > 0 && isLetter(text[start-1]) {
+		return true
+	}
+	if end < len(text) && isLetter(text[end]) {
+		return true
+	}
+	return false
 }
 
 // maskText replaces every raw-view finding span with a label placeholder.
