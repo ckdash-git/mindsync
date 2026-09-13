@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/ckdash-git/mindsync/checker"
+	"cigit01.ninjaconnect.co.in/ckdash/mindsync/checker"
 )
 
 func TestOrdinaryOnPCChoiceTriesAllThreeInOrder(t *testing.T) {

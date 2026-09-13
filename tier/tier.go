@@ -8,7 +8,7 @@
 // extracts shared logic specifically to prevent.
 package tier
 
-import "github.com/ckdash-git/mindsync/checker"
+import "cigit01.ninjaconnect.co.in/ckdash/mindsync/checker"
 
 // Tier is one of the three places an answer can come from (§6.1).
 type Tier string

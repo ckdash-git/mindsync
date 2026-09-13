@@ -1,6 +1,9 @@
 package checker
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSanitizeForDeliveryAllowPassesThrough(t *testing.T) {
 	result := Check("the weather is nice today", DefaultPolicy())
@@ -25,18 +28,41 @@ func TestSanitizeForDeliveryMasksSensitiveAnswer(t *testing.T) {
 	}
 }
 
-func TestSanitizeForDeliveryWithholdsSecretAnswer(t *testing.T) {
+func TestSanitizeForDeliveryRedactsSecretRatherThanWithholding(t *testing.T) {
+	// A secret in a generated ANSWER (as opposed to Refuse-level classified
+	// content) redacts and still delivers the rest — full withholding over
+	// one flagged span (e.g. a placeholder credential in example code)
+	// would destroy an otherwise-good answer for no safety benefit.
 	answer := "Here is the key: AKIAABCDEFGHIJKLMNOP"
 	result := Check(answer, DefaultPolicy())
 	out, blocked, reason := SanitizeForDelivery(result, answer)
-	if !blocked {
-		t.Fatal("expected a secret in the answer to block delivery entirely")
+	if blocked {
+		t.Fatal("expected a secret to be redacted, not fully withheld")
 	}
-	if out != "" {
-		t.Fatalf("expected an empty deliverable when blocked, got %q", out)
+	if out == answer {
+		t.Fatal("expected the key to be redacted from the delivered answer")
 	}
 	if reason == "" {
-		t.Fatal("expected a non-empty reason when withheld")
+		t.Fatal("expected a non-empty reason when redaction happens")
+	}
+}
+
+func TestSanitizeForDeliveryRedactsPlaceholderCredentialInExampleCode(t *testing.T) {
+	// The exact real-world case that motivated this change: a coding
+	// assistant's example snippet with a placeholder DB connection string
+	// must not get the whole (otherwise helpful) answer thrown away.
+	answer := `Wire it up like this:` + "\n```go\n" +
+		`db, err := postgres.New(ctx, "postgres://user:pw@localhost:5432/db")` + "\n```"
+	result := Check(answer, DefaultPolicy())
+	out, blocked, _ := SanitizeForDelivery(result, answer)
+	if blocked {
+		t.Fatal("expected the example code answer to still be delivered, just redacted")
+	}
+	if out == answer {
+		t.Fatal("expected the connection string to be redacted")
+	}
+	if !strings.Contains(out, "db, err := postgres.New") {
+		t.Fatalf("expected the rest of the answer to survive redaction, got: %s", out)
 	}
 }
 
