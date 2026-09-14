@@ -60,6 +60,7 @@ const (
 	KindSecret     FindingKind = "secret"
 	KindPII        FindingKind = "pii"
 	KindClassified FindingKind = "classified"
+	KindAttack     FindingKind = "attack"
 )
 
 // View records which reading of the text produced a finding (SRV-09).
@@ -94,6 +95,8 @@ func DefaultPolicy() Policy {
 			KindSecret:     KeepOnPC, // SRV-13: never to an outside provider, but still usable locally
 			KindPII:        Mask,     // SRV-14: masked in place, masked text sent
 			KindClassified: Refuse,   // company-marked terms: nothing goes anywhere
+			KindAttack:     Refuse, // G4: a prompt trying to hijack the assistant gets nothing, same as classified content
+
 		},
 		ClassifiedTerms: nil,
 	}
@@ -218,6 +221,12 @@ func scanText(text string, view View, policy Policy) []Finding {
 				continue
 			}
 			findings = append(findings, Finding{Kind: KindSecret, Label: rule.Label, View: view, Span: m})
+		}
+	}
+
+	for _, rule := range attackRules {
+		for _, m := range rule.Regex.FindAllString(text, -1) {
+			findings = append(findings, Finding{Kind: KindAttack, Label: rule.Label, View: view, Span: m})
 		}
 	}
 
