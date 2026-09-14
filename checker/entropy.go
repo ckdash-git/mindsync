@@ -73,6 +73,16 @@ func scanHighEntropy(text string, view View) []Finding {
 			// letter, and already handled by the card/phone/SSN checks).
 			continue
 		}
+		if isHexOnly(tok) && (len(tok) == 40 || len(tok) == 64) {
+			// A git commit SHA (40 hex chars, SHA-1) or a SHA-256 digest
+			// (64 hex chars) — both extremely common in ordinary
+			// engineering conversation (build hashes, commit refs) and
+			// not secrets. A real hex-encoded secret happening to land
+			// on exactly one of these two lengths is rare enough that
+			// excluding them outright beats flagging every commit hash
+			// anyone ever pastes.
+			continue
+		}
 		threshold := 4.0 // mixed alnum, ~62-symbol alphabet
 		if isHexOnly(tok) {
 			threshold = 3.0 // smaller alphabet, needs a lower bar

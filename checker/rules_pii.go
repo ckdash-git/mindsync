@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"fmt"
 	"math/big"
 	"regexp"
 	"strconv"
@@ -11,6 +12,11 @@ var (
 	emailRe         = regexp.MustCompile(`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`)
 	phoneRe         = regexp.MustCompile(`\+?\d[\d\-\s]{8,14}\d`)
 	cardCandidateRe = regexp.MustCompile(`\b(?:\d[ -]?){13,19}\b`)
+	// IPv4 only — matches a plausible address; ipIsPrivate below decides
+	// whether it's actually PII (a public address that could identify a
+	// real person/machine) or just an internal reference (SRV-14 only
+	// requires masking what's actually personal data).
+	ipv4Re = regexp.MustCompile(`\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b`)
 	// US SSN format only. Format-valid does not mean real — see
 	// ssnLooksValid for the area-number check that catches obviously fake
 	// ones (000/666/900-999), same spirit as the card Luhn check: confirm
@@ -47,6 +53,31 @@ func allSameDigit(digits string) bool {
 		}
 	}
 	return true
+}
+
+// ipIsPrivate reports whether an IPv4 address is in a range reserved for
+// internal networks (RFC 1918), loopback, or link-local — none of which
+// identify a real external party, matching the corpus's own distinction
+// between "10.1.4.22 inside the office" (allow) and "8.8.8.8" (mask).
+func ipIsPrivate(ip string) bool {
+	var a, b int
+	if _, err := fmt.Sscanf(ip, "%d.%d.", &a, &b); err != nil {
+		return false
+	}
+	switch {
+	case a == 10:
+		return true
+	case a == 172 && b >= 16 && b <= 31:
+		return true
+	case a == 192 && b == 168:
+		return true
+	case a == 127:
+		return true
+	case a == 169 && b == 254:
+		return true
+	default:
+		return false
+	}
 }
 
 func luhnValid(digits string) bool {

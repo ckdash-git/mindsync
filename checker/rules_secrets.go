@@ -33,5 +33,14 @@ var secretRules = []secretRule{
 	{"jwt", regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_\-]{5,}\b`)},
 	{"private_key_block", regexp.MustCompile(`-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----`)},
 	{"db_connection_string_with_password", regexp.MustCompile(`(?i)\b(postgres(ql)?|mysql|mongodb(\+srv)?|redis):\/\/[^:\s]+:[^@\s]+@[^\s]+`)},
-	{"generic_api_key_assignment", regexp.MustCompile(`(?i)(api[_-]?key|secret[_-]?key|access[_-]?token)["']?\s*[:=]\s*["']?[A-Za-z0-9_\-]{16,}`)},
+	{"generic_api_key_assignment", regexp.MustCompile(`(?i)(api[_-]?key|secret[_-]?key|access[_-]?token|password|passwd|pwd)["']?\s*[:=]\s*["']?[A-Za-z0-9_\-]{8,}`)},
 }
+
+// classificationMarkingRe catches the standard government/enterprise
+// classification banners (TOP SECRET, SECRET, CONFIDENTIAL, and the
+// dissemination-control suffixes like //NOFORN) as a BUILT-IN detection,
+// independent of an administrator's own ClassifiedTerms list. An admin's
+// list covers company-specific terms ("Project Nightingale"); this covers
+// the standard markings that should never need per-customer configuration
+// to be recognized at all.
+var classificationMarkingRe = regexp.MustCompile(`(?i)\b(TOP SECRET|SECRET//NOFORN|CONFIDENTIAL//[A-Z]+|UNCLASSIFIED//FOUO)\b`)

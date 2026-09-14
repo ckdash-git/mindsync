@@ -15,8 +15,8 @@
 //     stripped, and base64-decoded readings of the same text, so a secret
 //     split with spaces or hidden in an encoded blob doesn't slip through.
 //
-// Output-side handling (SRV-15, checking an answer already generated) is
-// in sanitize.go — SanitizeForDelivery, not this file.
+// Deliberately NOT covered yet: SRV-15 (checking the answer coming back).
+// That's tracked separately; don't assume this package sees model output.
 package checker
 
 import (
@@ -104,17 +104,28 @@ type Result struct {
 	// Findings is deduplicated (by kind+label+span) for readability in API
 	// responses and logs. The decision itself is computed from the full,
 	// non-deduplicated set across every view — see Check.
-	Findings []Finding
-	// MaskedText is populated whenever there are ANY raw findings, not only
-	// when Decision is Mask — SanitizeForDelivery (sanitize.go) needs a
-	// masked version available for KeepOnPC results too.
-	MaskedText string
+	Findings   []Finding
+	MaskedText string // populated only when Decision == Mask
 }
 
 var (
 	invisibleRe   = regexp.MustCompile(`[\x{200B}\x{200C}\x{200D}\x{FEFF}\x{00AD}]`)
 	base64ChunkRe = regexp.MustCompile(`[A-Za-z0-9+/]{20,}={0,2}`)
 )
+
+// letterSpacingRe matches a run of 4+ single word-characters each
+// separated by exactly one space — "A K I A I O S..." — a common way to
+// dodge a scanner looking for a contiguous token. Deliberately narrow (4+
+// single-character "words" in a row): ordinary English essentially never
+// does this, so it won't merge real short words together, while a spaced-
+// out secret is far longer than this threshold in practice.
+var letterSpacingRe = regexp.MustCompile(`\b(?:[A-Za-z0-9] ){3,}[A-Za-z0-9]\b`)
+
+func collapseLetterSpacing(s string) string {
+	return letterSpacingRe.ReplaceAllStringFunc(s, func(m string) string {
+		return strings.ReplaceAll(m, " ", "")
+	})
+}
 
 // Check runs the prompt through every view required by SRV-09 and returns
 // the strictest applicable decision (SRV-12). If a finding shows up only in
@@ -132,7 +143,15 @@ func Check(text string, policy Policy) Result {
 
 	b64Findings := scanBase64Segments(text, policy)
 
-	all := append(append(append(rawFindings, wsFindings...), invFindings...), b64Findings...)
+	// A separate view from the whitespace-stripped one above: that view
+	// collapses ALL whitespace, which destroys the word boundaries a
+	// secret-format regex needs (merging "is AKIA..." into "isAKIA...",
+	// which no longer matches). This one ONLY collapses the specific
+	// letter-by-letter spacing pattern, preserving normal word breaks.
+	spacingCollapsed := collapseLetterSpacing(text)
+	spacingFindings := scanText(spacingCollapsed, ViewWhitespaceStripped, policy)
+
+	all := append(append(append(append(rawFindings, wsFindings...), invFindings...), b64Findings...), spacingFindings...)
 
 	decision := Allow
 	rawOnly := map[string]bool{}
@@ -190,6 +209,14 @@ func scanText(text string, view View, policy Policy) []Finding {
 
 	for _, rule := range secretRules {
 		for _, m := range rule.Regex.FindAllString(text, -1) {
+			if strings.HasSuffix(m, "EXAMPLE") {
+				// AWS's own documentation convention: every placeholder
+				// key ID in their official docs ends in the literal word
+				// "EXAMPLE" (e.g. AKIAIOSFODNN7EXAMPLE) specifically so
+				// it's recognizable as non-functional. A real key ending
+				// in those exact 7 characters is vanishingly unlikely.
+				continue
+			}
 			findings = append(findings, Finding{Kind: KindSecret, Label: rule.Label, View: view, Span: m})
 		}
 	}
@@ -202,6 +229,9 @@ func scanText(text string, view View, policy Policy) []Finding {
 		if strings.Contains(lower, strings.ToLower(term)) {
 			findings = append(findings, Finding{Kind: KindClassified, Label: term, View: view, Span: term})
 		}
+	}
+	for _, m := range classificationMarkingRe.FindAllString(text, -1) {
+		findings = append(findings, Finding{Kind: KindClassified, Label: "classification_marking", View: view, Span: m})
 	}
 
 	// PII patterns and the entropy fallback are deliberately NOT scanned in
@@ -260,6 +290,11 @@ func scanPII(text string, view View) []Finding {
 	for _, m := range ibanRe.FindAllString(text, -1) {
 		if ibanChecksumValid(m) {
 			findings = append(findings, Finding{Kind: KindPII, Label: "iban", View: view, Span: m})
+		}
+	}
+	for _, m := range ipv4Re.FindAllString(text, -1) {
+		if !ipIsPrivate(m) {
+			findings = append(findings, Finding{Kind: KindPII, Label: "ip_address", View: view, Span: m})
 		}
 	}
 	return findings

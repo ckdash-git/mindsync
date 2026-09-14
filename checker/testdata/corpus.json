@@ -1,0 +1,27 @@
+{
+  "_comment": "Shared conformance corpus for the C1 AI Guard prompt check. Both the server (internal/aigw) and the PC agent (internal/firewall) run this. A prompt judged differently on the two sides is a governance hole, so any detector change must be made on both sides and reflected here.",
+  "cases": [
+    {"name": "plain prose is allowed", "prompt": "Please summarise the quarterly report for the board.", "action": "allow"},
+    {"name": "an order number is not a card number", "prompt": "Order 4482991003847771222 shipped on Tuesday.", "action": "allow"},
+    {"name": "a hex digest is not a secret", "prompt": "The build hash is 5f2c9a1b4e7d3068af51cc92be04713d5f2c9a1b.", "action": "allow"},
+    {"name": "a private address is not personal data", "prompt": "The service listens on 10.1.4.22 inside the office.", "action": "allow"},
+
+    {"name": "an email is masked", "prompt": "Email the invoice to alice.smith@example.com please.", "action": "redact", "labels": ["email"]},
+    {"name": "a card number is masked", "prompt": "Charge card 4111111111111111 for the renewal.", "action": "redact", "labels": ["credit-card"]},
+    {"name": "a social security number is masked", "prompt": "The employee SSN is 123-45-6789.", "action": "redact", "labels": ["us-ssn"]},
+    {"name": "a public address is masked", "prompt": "Trace the request from 8.8.8.8 in the log.", "action": "redact", "labels": ["ip-address"]},
+
+    {"name": "an aws key is kept on the PC", "prompt": "Use AKIAIOSFODNN7EXAMPLQ to reach the bucket.", "action": "local", "labels": ["aws-access-key"]},
+    {"name": "a private key is kept on the PC", "prompt": "-----BEGIN RSA PRIVATE KEY-----\nMIIEow...", "action": "local", "labels": ["private-key"]},
+    {"name": "a password assignment is kept on the PC", "prompt": "Set password = hunter2hunter2 in the config.", "action": "local", "labels": ["secret-assignment"]},
+    {"name": "a database url with credentials is kept on the PC", "prompt": "Connect to postgres://app:s3cretpw@db.internal/prod and check.", "action": "local", "labels": ["db-connection-string"]},
+
+    {"name": "a classification marking is refused", "prompt": "This document is TOP SECRET and must be handled carefully.", "action": "block", "labels": ["classification-marking"]},
+
+    {"name": "a key spaced out to hide it is kept on the PC", "prompt": "the key is A K I A I O S F O D N N 7 E X A M P L Q ok", "action": "local", "labels": ["evasion"]},
+    {"name": "the strictest finding wins", "prompt": "Email alice@example.com the key AKIAIOSFODNN7EXAMPLQ.", "action": "local"},
+    {"name": "a marking beats a secret", "prompt": "TOP SECRET: the key is AKIAIOSFODNN7EXAMPLQ.", "action": "block"},
+
+    {"name": "the documented example key is allowed", "prompt": "The docs use AKIAIOSFODNN7EXAMPLE as a placeholder.", "action": "allow"}
+  ]
+}
